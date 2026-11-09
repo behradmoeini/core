@@ -430,18 +430,20 @@ internal class SongRepositoryImpl(
      */
     private suspend fun List<SongItem>.preferAudioWhenRadioAudioOnly(isRadio: Boolean): List<SongItem> {
         if (!isRadio) return this
-        if (dataStoreManager.radioAudioOnly.first() != TRUE) return this
+        // Fork: podcast episodes never belong in a music radio, whatever the audio-only setting says.
+        val items = filterNot { MusicVideoType.isPodcast(it.musicVideoType) }
+        if (dataStoreManager.radioAudioOnly.first() != TRUE) return items
         val songs =
-            mapNotNull { item ->
+            items.mapNotNull { item ->
                 if (MusicVideoType.isVideoSong(item.musicVideoType)) {
                     item.counterpart?.takeIf { MusicVideoType.isAudio(it.musicVideoType) }
                 } else {
                     item
                 }
             }.distinctBy { it.id }
-        val swapped = count { MusicVideoType.isVideoSong(it.musicVideoType) && MusicVideoType.isAudio(it.counterpart?.musicVideoType) }
-        Logger.d(TAG, "Radio audio version: $size rows, $swapped swapped to the song, ${songs.size} kept")
-        return songs.ifEmpty { this }
+        val swapped = items.count { MusicVideoType.isVideoSong(it.musicVideoType) && MusicVideoType.isAudio(it.counterpart?.musicVideoType) }
+        Logger.d(TAG, "Radio audio version: ${items.size} rows, $swapped swapped to the song, ${songs.size} kept")
+        return songs.ifEmpty { items }
     }
 
     override fun getContinueTrack(
