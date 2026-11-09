@@ -108,6 +108,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import org.koin.mp.KoinPlatform.getKoin
 import java.util.concurrent.atomic.AtomicBoolean
@@ -1687,8 +1688,13 @@ internal class MediaServiceHandlerImpl(
     }
 
     override fun getRelated(videoId: String) {
-        if (queueData.value.queueState == QueueData.StateSource.STATE_INITIALIZING) return
         coroutineScope.launch {
+            // Fork fix: this used to return straight away while the queue was still loading, so a song
+            // started from Home could play with no next track. Wait for the load to finish instead; the
+            // wait is bounded, so a load that never ends cannot block the radio forever.
+            withTimeoutOrNull(15_000L) {
+                _queueData.first { it.queueState != QueueData.StateSource.STATE_INITIALIZING }
+            }
             songRepository.getRelatedData(videoId).collect { response ->
                 when (response) {
                     is Resource.Success -> {
@@ -1704,7 +1710,7 @@ internal class MediaServiceHandlerImpl(
                     }
 
                     is Resource.Error -> {
-                        Logger.d("Check Related", "getRelated: ${response.message}")
+                        Logger.w("Radio", "Related songs failed for $videoId: ${response.message}")
                         _queueData.update {
                             it.copy(
                                 queueState = QueueData.StateSource.STATE_INITIALIZED,
