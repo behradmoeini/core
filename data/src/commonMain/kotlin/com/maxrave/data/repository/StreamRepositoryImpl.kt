@@ -91,6 +91,8 @@ internal class StreamRepositoryImpl(
         muxed: Boolean,
     ): Flow<String?> =
         flow {
+            // Fork: one line per stream request, so a track's start is visible in the app log.
+            Logger.i("Stream", "getStream $videoId downloading=$isDownloading video=$isVideo")
             val itag =
                 if (isDownloading) {
                     QUALITY.itagOf(dataStoreManager.downloadQuality.first())

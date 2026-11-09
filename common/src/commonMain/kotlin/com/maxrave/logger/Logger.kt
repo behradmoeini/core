@@ -23,8 +23,9 @@ object Logger {
 
     const val APP_LOG = "app"
     const val ERROR_LOG = "error"
-    private const val APP_LOG_FILES = 3
-    private const val ERROR_LOG_FILES = 2
+    // Fork: enough room for about a week of Info lines (60 MB app log, 5 MB error log).
+    private const val APP_LOG_FILES = 12
+    private const val ERROR_LOG_FILES = 5
 
     /** The folder [enableFileLogging] writes to; null while the log only reaches Logcat/console. */
     var logDirectory: String? = null
@@ -44,8 +45,8 @@ object Logger {
         runCatching { SystemFileSystem.createDirectories(path) }
         logDirectory = directory
         logger.addLogWriter(
-            LevelFileWriter(path, APP_LOG, rollOnSize = 1_000_000, maxLogFiles = APP_LOG_FILES, minSeverity = Severity.Info),
-            LevelFileWriter(path, ERROR_LOG, rollOnSize = 512_000, maxLogFiles = ERROR_LOG_FILES, minSeverity = Severity.Error),
+            LevelFileWriter(path, APP_LOG, rollOnSize = 5_000_000, maxLogFiles = APP_LOG_FILES, minSeverity = Severity.Info),
+            LevelFileWriter(path, ERROR_LOG, rollOnSize = 1_000_000, maxLogFiles = ERROR_LOG_FILES, minSeverity = Severity.Error),
         )
     }
 

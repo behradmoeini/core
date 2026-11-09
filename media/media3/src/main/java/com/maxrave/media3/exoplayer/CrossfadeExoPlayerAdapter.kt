@@ -238,6 +238,8 @@ internal class CrossfadeExoPlayerAdapter(
 
     private val audioFocusListener =
         AudioManager.OnAudioFocusChangeListener { focusChange ->
+            // Fork: audio focus is the usual reason a track keeps "playing" with no sound.
+            Logger.i(TAG, "audio focus change=$focusChange playing=${internalState == InternalState.PLAYING} volume=$internalVolume")
             when (focusChange) {
                 AudioManager.AUDIOFOCUS_GAIN -> {
                     // Don't fight the crossfade ramp; while crossfading it owns the volume.
