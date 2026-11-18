@@ -1687,42 +1687,62 @@ internal class MediaServiceHandlerImpl(
         }
     }
 
-    override fun getRelated(videoId: String) {
-        coroutineScope.launch {
-            // Fork fix: this used to return straight away while the queue was still loading, so a song
-            // started from Home could play with no next track. Wait for the load to finish instead; the
-            // wait is bounded, so a load that never ends cannot block the radio forever.
-            withTimeoutOrNull(15_000L) {
-                _queueData.first { it.queueState != QueueData.StateSource.STATE_INITIALIZING }
-            }
-            songRepository.getRelatedData(videoId).collect { response ->
-                when (response) {
-                    is Resource.Success -> {
-                        loadMoreCatalog(response.data?.first?.toCollection(arrayListOf()) ?: arrayListOf())
-                        _queueData.update {
-                            it.copy(
-                                data =
-                                    it.data.copy(
-                                        continuation = response.data?.second,
-                                    ),
-                            )
-                        }
-                    }
+    // Fork: the song whose related songs are being fetched, so a second request for the same song
+    // (the app retries after a few seconds) does not append the same radio batch twice. A request
+    // for another song always goes ahead; the queue check below drops the stale one.
+    private val relatedInFlight = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
-                    is Resource.Error -> {
-                        Logger.w("Radio", "Related songs failed for $videoId: ${response.message}")
-                        _queueData.update {
-                            it.copy(
-                                queueState = QueueData.StateSource.STATE_INITIALIZED,
-                                data =
-                                    it.data.copy(
-                                        continuation = null,
-                                    ),
-                            )
+    override fun getRelated(videoId: String) {
+        if (relatedInFlight.get() == videoId) {
+            Logger.d("Radio", "Related songs already being fetched for $videoId, skipping the repeat request")
+            return
+        }
+        relatedInFlight.set(videoId)
+        coroutineScope.launch {
+            try {
+                // Fork fix: this used to return straight away while the queue was still loading, so a song
+                // started from Home could play with no next track. Wait for the load to finish instead; the
+                // wait is bounded, so a load that never ends cannot block the radio forever.
+                withTimeoutOrNull(15_000L) {
+                    _queueData.first { it.queueState != QueueData.StateSource.STATE_INITIALIZING }
+                }
+                songRepository.getRelatedData(videoId).collect { response ->
+                    // The user may have started another queue while this waited or fetched: the related
+                    // songs of a track that is no longer in the queue do not belong in it.
+                    if (_queueData.value.data.listTracks.none { it.videoId == videoId }) {
+                        Logger.w("Radio", "Queue changed while fetching related songs for $videoId, dropping them")
+                        return@collect
+                    }
+                    when (response) {
+                        is Resource.Success -> {
+                            loadMoreCatalog(response.data?.first?.toCollection(arrayListOf()) ?: arrayListOf())
+                            _queueData.update {
+                                it.copy(
+                                    data =
+                                        it.data.copy(
+                                            continuation = response.data?.second,
+                                        ),
+                                )
+                            }
                         }
-                        reorderShuffledQueue(player.getCurrentMediaTimeLine())
+
+                        is Resource.Error -> {
+                            Logger.w("Radio", "Related songs failed for $videoId: ${response.message}")
+                            _queueData.update {
+                                it.copy(
+                                    queueState = QueueData.StateSource.STATE_INITIALIZED,
+                                    data =
+                                        it.data.copy(
+                                            continuation = null,
+                                        ),
+                                )
+                            }
+                            reorderShuffledQueue(player.getCurrentMediaTimeLine())
+                        }
                     }
                 }
+            } finally {
+                relatedInFlight.compareAndSet(videoId, null)
             }
         }
     }
