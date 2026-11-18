@@ -3168,6 +3168,9 @@ class MpvPlayerAdapter(
             }
         }
 
+        // Fork: an RSS podcast episode is a plain audio file; mpv opens its URL directly.
+        com.maxrave.domain.data.player.DirectAudio.urlOf(videoId)?.let { return PlayableSource(isVideo = false, url = it) }
+
         // A live broadcast is one HLS playlist carrying audio and video together: there is nothing
         // to merge, and nothing about it is in the format table (see StreamRepositoryImpl).
         if (LiveStreamRegistry.isLive(videoId)) return liveStreamSource(videoId, asVideo = shouldFindVideo)

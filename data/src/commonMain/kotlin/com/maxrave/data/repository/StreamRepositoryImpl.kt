@@ -93,6 +93,11 @@ internal class StreamRepositoryImpl(
         flow {
             // Fork: one line per stream request, so a track's start is visible in the app log.
             Logger.i("Stream", "getStream $videoId downloading=$isDownloading video=$isVideo")
+            // Fork: an RSS podcast episode is already a plain file URL; nothing to resolve.
+            if (com.maxrave.domain.data.player.DirectAudio.isDirect(videoId)) {
+                emit(com.maxrave.domain.data.player.DirectAudio.urlOf(videoId))
+                return@flow
+            }
             val itag =
                 if (isDownloading) {
                     QUALITY.itagOf(dataStoreManager.downloadQuality.first())

@@ -741,6 +741,9 @@ internal class MediaServiceHandlerImpl(
                             }
                         }
                     }
+                // Fork: SponsorBlock and YouTube's format/watch-time data do not exist for a
+                // podcast episode (a plain audio file).
+                if (com.maxrave.domain.data.player.DirectAudio.isDirect(videoId)) return@launch
                 if (dataStoreManager.sponsorBlockEnabled.first() == TRUE) {
                     getSkipSegments(videoId)
                 }
@@ -1693,6 +1696,8 @@ internal class MediaServiceHandlerImpl(
     private val relatedInFlight = java.util.concurrent.atomic.AtomicReference<String?>(null)
 
     override fun getRelated(videoId: String) {
+        // Fork: a podcast episode has no YouTube radio.
+        if (com.maxrave.domain.data.player.DirectAudio.isDirect(videoId)) return
         if (relatedInFlight.get() == videoId) {
             Logger.d("Radio", "Related songs already being fetched for $videoId, skipping the repeat request")
             return
@@ -2861,7 +2866,8 @@ internal class MediaServiceHandlerImpl(
     ) {
         coroutineScope.launch {
             val trackingEnabled = dataStoreManager.localTrackingEnabled.first() == TRUE
-            if (!trackingEnabled) {
+            // Fork: podcast episodes stay out of the music analytics (top songs, Wrapped, mixes).
+            if (!trackingEnabled || com.maxrave.domain.data.player.DirectAudio.isDirect(song.videoId)) {
                 return@launch
             }
             val percent = (currentPositionMillis / (song.durationSeconds * 1000f))

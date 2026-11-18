@@ -391,6 +391,12 @@ private fun provideExtractorFactory(): ExtractorsFactory =
             Mp4Extractor(
                 DefaultSubtitleParserFactory(),
             ),
+            // Fork: RSS podcast episodes are mostly MP3, sometimes AAC (ADTS), Ogg or WAV. Listed
+            // last, so YouTube's WebM and MP4 streams are still matched by the extractors above.
+            androidx.media3.extractor.mp3.Mp3Extractor(),
+            androidx.media3.extractor.ts.AdtsExtractor(),
+            androidx.media3.extractor.ogg.OggExtractor(),
+            androidx.media3.extractor.wav.WavExtractor(),
         )
     }
 

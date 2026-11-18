@@ -99,7 +99,9 @@ fun Track.toGenericMediaItem(): GenericMediaItem {
                 this.thumbnails?.last()?.height == this.thumbnails?.last()?.width &&
                 this.thumbnails?.last()?.height != null
         ) &&
-            (!thumbUrl.contains("hq720") && !thumbUrl.contains("maxresdefault"))
+            (!thumbUrl.contains("hq720") && !thumbUrl.contains("maxresdefault")) ||
+            // Fork: a podcast episode is audio only, whatever shape its cover art is.
+            com.maxrave.domain.data.player.DirectAudio.isDirect(this.videoId)
     return GenericMediaItem(
         mediaId = this.videoId,
         uri = this.videoId,

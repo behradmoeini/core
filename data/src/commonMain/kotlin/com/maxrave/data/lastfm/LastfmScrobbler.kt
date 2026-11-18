@@ -59,8 +59,11 @@ class LastfmScrobbler(
             currentVideoId = song.videoId
             currentDurationSeconds = song.durationSeconds
             startedAtEpochSeconds = Clock.System.now().epochSeconds
-            scrobbled = false
-            currentTrack = song.toLastfmTrack()
+            // Fork: a podcast episode is not a track to scrobble; marking it scrobbled keeps
+            // onProgress quiet until the next song starts.
+            val isPodcast = com.maxrave.domain.data.player.DirectAudio.isDirect(song.videoId)
+            scrobbled = isPodcast
+            currentTrack = if (isPodcast) null else song.toLastfmTrack()
         }
 
         val sessionKey = sessionKeyOrNull() ?: return
