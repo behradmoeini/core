@@ -252,6 +252,12 @@ private fun provideResolvingDataSourceFactory(
         // A live broadcast reached a progressive source that was built before it was known to be
         // live; failing it is what gets the track rebuilt as HLS — see LiveStreamDetectedException.
         if (LiveStreamRegistry.isLive(videoId)) throw LiveStreamDetectedException(videoId)
+        // Fork: a podcast episode is one plain file. It is opened whole, not in 5 MiB ranges: an
+        // MP3 without a seek header takes its duration and seek points from the file's length,
+        // which a ranged request would report as the range's. The cache still keys on the id.
+        com.maxrave.domain.data.player.DirectAudio.urlOf(videoId)?.let { url ->
+            return@Factory dataSpec.withUri(url.toUri())
+        }
         Logger.d("Stream", mediaId)
         Logger.d("Stream", mediaId.startsWith(MERGING_DATA_TYPE.VIDEO).toString())
         if (downloadCache.isFullyCached(mediaId, dataSpec.position)) {
@@ -393,8 +399,10 @@ private fun provideExtractorFactory(): ExtractorsFactory =
             ),
             // Fork: RSS podcast episodes are mostly MP3, sometimes AAC (ADTS), Ogg or WAV. Listed
             // last, so YouTube's WebM and MP4 streams are still matched by the extractors above.
-            androidx.media3.extractor.mp3.Mp3Extractor(),
-            androidx.media3.extractor.ts.AdtsExtractor(),
+            // Constant-bitrate seeking: many podcast MP3s carry no seek header, and without it the
+            // episode could not be scrubbed or resumed where it was left.
+            androidx.media3.extractor.mp3.Mp3Extractor(androidx.media3.extractor.mp3.Mp3Extractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING),
+            androidx.media3.extractor.ts.AdtsExtractor(androidx.media3.extractor.ts.AdtsExtractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING),
             androidx.media3.extractor.ogg.OggExtractor(),
             androidx.media3.extractor.wav.WavExtractor(),
         )
