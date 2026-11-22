@@ -14,7 +14,7 @@ kotlin {
         minSdk = 26
     }
 
-    // Android sends, Desktop receives; iOS takes no part. With JVM-based targets only, commonMain can
+    // Android phones send, Desktop and Android TV receive; iOS takes no part. With JVM-based targets only, commonMain can
     // use javax.crypto directly — no expect/actual for the cipher.
     jvm()
 
@@ -28,12 +28,8 @@ kotlin {
                 implementation(projects.ktorExt)
                 // Logger.
                 implementation(projects.common)
-            }
-        }
-
-        jvmMain {
-            dependencies {
-                // Only the Desktop hosts a server; the APK never ships these.
+                // The receiving end's server. The Desktop hosts it, and so does the app on a TV, where
+                // there is no camera to scan with and no keyboard to sign in with.
                 implementation(libs.ktor.server.core)
                 implementation(libs.ktor.server.cio)
             }

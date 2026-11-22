@@ -111,6 +111,9 @@ kotlin {
         }
 
         androidMain {
+            // The login sync host runs on the Desktop and on Android TV but not on iOS, so its one
+            // file sits in a folder both of those source sets compile.
+            kotlin.srcDir("src/jvmAndroidMain/kotlin")
             dependencies {
                 // Add Android-specific dependencies here. Note that this source set depends on
                 // commonMain by default and will correctly pull the Android artifacts of any KMP
@@ -118,7 +121,7 @@ kotlin {
                 implementation(libs.koin.android)
                 implementation(projects.media3)
                 implementation(libs.room.ktx)
-                // Login sync: the phone sends sign-ins to the Desktop
+                // Login sync: the phone sends sign-ins to the Desktop; a TV receives them like a Desktop
                 implementation(projects.loginSync)
             }
         }
@@ -134,6 +137,7 @@ kotlin {
         }
 
         jvmMain {
+            kotlin.srcDir("src/jvmAndroidMain/kotlin")
             dependencies {
                 implementation(projects.mediaJvm)
                 implementation(libs.nowplaying)

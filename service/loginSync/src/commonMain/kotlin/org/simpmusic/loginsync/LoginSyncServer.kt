@@ -186,6 +186,14 @@ private val HOST_ONLY_NIC_PREFIXES = listOf("docker", "br-", "veth", "virbr", "v
 
 /** The name the user knows this computer by. Blocking on macOS (runs scutil). */
 private fun localDeviceName(): DeviceName {
+    // Android (a TV): os.name is just "Linux" and there is no hostname worth showing, so ask
+    // android.os.Build — by reflection, since this file is compiled for the Desktop JVM as well.
+    if (System.getProperty("java.vm.name").orEmpty().startsWith("Dalvik")) {
+        val build = runCatching { Class.forName("android.os.Build") }.getOrNull()
+
+        fun field(name: String) = runCatching { build?.getField(name)?.get(null) as? String }.getOrNull()?.takeIf { it.isNotBlank() }
+        return DeviceName(name = field("MODEL") ?: "Android TV", os = "Android")
+    }
     val osName = System.getProperty("os.name").orEmpty()
     val isMac = osName.startsWith("Mac")
     val name =
