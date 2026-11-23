@@ -58,6 +58,9 @@ interface SongRepository {
     /** Smart downloads switched off: removes every marked song, except the ones the user now keeps. */
     suspend fun clearSmartDownloads()
 
+    /** Fork: every play of the last [days] days, for the own recommender's taste model. */
+    suspend fun getPlayHistory(days: Int): List<com.maxrave.domain.recommendation.PlayHistoryRow>
+
     /**
      * Erase the local listening history and drop every song row nothing refers to any more.
      *

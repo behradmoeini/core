@@ -24,11 +24,14 @@ import com.maxrave.domain.manager.DataStoreManager.Values.TRUE
 import com.maxrave.domain.mediaservice.handler.DownloadHandler
 import com.maxrave.domain.mediaservice.handler.MediaPlayerHandler
 import com.maxrave.domain.repository.SongRepository
+import com.maxrave.domain.recommendation.OwnRadio
+import com.maxrave.domain.recommendation.PlayHistoryRow
 import com.maxrave.domain.utils.MusicVideoType
 import com.maxrave.domain.utils.Resource
 import com.maxrave.domain.utils.YouTubeLikeStatus
 import com.maxrave.domain.utils.isLive
 import com.maxrave.domain.utils.isRadioQueueId
+import com.maxrave.domain.utils.toTrack
 import com.maxrave.kotlinytmusicscraper.YouTube
 import com.maxrave.kotlinytmusicscraper.models.SongItem
 import com.maxrave.kotlinytmusicscraper.models.WatchEndpoint
@@ -67,6 +70,40 @@ internal class SongRepositoryImpl(
         flow {
             emit(localDataSource.getAllSongs(limit))
         }.flowOn(Dispatchers.IO)
+
+    override suspend fun getPlayHistory(days: Int): List<PlayHistoryRow> =
+        withContext(Dispatchers.IO) {
+            val nowTime = now()
+            val since = LocalDateTime(nowTime.date.minus(days, DateTimeUnit.DAY), nowTime.time)
+            // Both sides are the local wall clock read as UTC (see rankBySmartDownloadScore), so
+            // their difference is the real age.
+            val nowMillis = nowTime.toInstant(TimeZone.UTC).toEpochMilliseconds()
+            localDataSource.getSongPlaysSince(since).map { play ->
+                PlayHistoryRow(
+                    videoId = play.videoId,
+                    ageDays = ((nowMillis - play.timestamp.toInstant(TimeZone.UTC).toEpochMilliseconds()) / 86_400_000.0).coerceAtLeast(0.0),
+                    listenedSecond = play.listenedSecond,
+                    durationSecond = play.durationSecond,
+                )
+            }
+        }
+
+    /**
+     * Fork: the own recommender's songs to follow [seedVideoId], or null when it is not registered,
+     * fails or has nothing, in which case the caller asks YouTube as upstream does.
+     */
+    private suspend fun ownRadio(
+        seedVideoId: String,
+        more: Boolean,
+    ): List<Track>? =
+        try {
+            OwnRadio.source?.radio(seedVideoId, more)?.filter { it.videoId != seedVideoId }?.takeIf { it.isNotEmpty() }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Logger.w(TAG, "Own radio failed for $seedVideoId: ${e.message}")
+            null
+        }
 
     override suspend fun setInLibrary(
         videoId: String,
@@ -452,6 +489,13 @@ internal class SongRepositoryImpl(
         fromPlaylist: Boolean,
     ): Flow<Pair<ArrayList<Track>?, String?>> =
         flow {
+            // Fork: a radio of our own continues from our own recommender. When it has nothing
+            // more, the null answer makes the player start a new radio from the queue's last song.
+            OwnRadio.seedOf(continuation)?.let { seed ->
+                val more = ownRadio(seed, more = true)
+                emit(Pair(more?.let { ArrayList(it) }, if (more != null) continuation else null))
+                return@flow
+            }
             runCatching {
                 var newContinuation: String? = null
                 Logger.d(TAG, "getContinueTrack -> playlistId: $playlistId")
@@ -651,6 +695,11 @@ internal class SongRepositoryImpl(
 
     override fun getRelatedData(videoId: String): Flow<Resource<Pair<List<Track>, String?>>> =
         flow {
+            // Fork: what follows a song comes from the own recommender; YouTube only when it cannot answer.
+            ownRadio(videoId, more = false)?.let { own ->
+                emit(Resource.Success<Pair<List<Track>, String?>>(Pair(own, OwnRadio.continuation(videoId))))
+                return@flow
+            }
             runCatching {
                 youTube
                     .next(WatchEndpoint(videoId = videoId))
@@ -750,6 +799,18 @@ internal class SongRepositoryImpl(
 
     override fun getRadioFromEndpoint(endpoint: YouTubeWatchEndpoint): Flow<Resource<Pair<List<Track>, String?>>> =
         flow {
+            // Fork: a single song's radio ("Start radio") is our own. YouTube's answer begins with
+            // the song itself and callers play its first row, so ours does too. Playlist shuffles
+            // and artist radios carry other ids and still go to YouTube.
+            val seedId = endpoint.videoId
+            if (seedId != null && OwnRadio.isSongRadio(endpoint.playlistId, seedId)) {
+                val seed = withContext(Dispatchers.IO) { localDataSource.getSong(seedId) }?.toTrack()
+                val own = if (seed != null) ownRadio(seedId, more = false) else null
+                if (seed != null && own != null) {
+                    emit(Resource.Success(Pair(listOf(seed) + own, OwnRadio.continuation(seedId))))
+                    return@flow
+                }
+            }
             runCatching {
                 youTube
                     .next(endpoint.toWatchEndpoint())

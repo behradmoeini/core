@@ -1150,7 +1150,9 @@ internal class DataStoreManagerImpl(
 
     override val endlessQueue =
         settingsDataStore.data.map { preferences ->
-            preferences[ENDLESS_QUEUE] ?: FALSE
+            // Fork: on unless switched off. A playlist or album that ends carries on with the own
+            // recommender's radio of its last song instead of going quiet.
+            preferences[ENDLESS_QUEUE] ?: TRUE
         }
 
     override suspend fun setEndlessQueue(endlessQueue: Boolean) {
