@@ -20,6 +20,45 @@ private const val TAG = "Extractor"
 private const val LOCAL_TIER = "local"
 private const val REMOTE_TIER = "pipepipe.dev"
 
+/**
+ * Fork: whether an extraction tier is worth trying right now.
+ *
+ * The tiers are tried in order and each failure costs seconds, paid before the song can start. A
+ * tier that fails twice in a row is rested: 5 minutes, doubling with every further failure up to
+ * an hour. When the rest ends it gets one try; a success clears its record. So a tier that is
+ * broken for a day costs one slow start an hour instead of every start.
+ */
+private class TierHealth(
+    private val name: String,
+) {
+    private var failuresInARow = 0
+    private var restUntilMs = 0L
+
+    @Synchronized
+    fun usable(): Boolean = System.currentTimeMillis() >= restUntilMs
+
+    @Synchronized
+    fun report(worked: Boolean) {
+        if (worked) {
+            failuresInARow = 0
+            restUntilMs = 0L
+            return
+        }
+        failuresInARow++
+        if (failuresInARow >= FAILURES_BEFORE_REST) {
+            val rest = (FIRST_REST_MS shl (failuresInARow - FAILURES_BEFORE_REST).coerceAtMost(4)).coerceAtMost(MAX_REST_MS)
+            restUntilMs = System.currentTimeMillis() + rest
+            Logger.w(TAG, "Extraction tier $name failed $failuresInARow times in a row, resting it for ${rest / 60_000} min")
+        }
+    }
+
+    private companion object {
+        const val FAILURES_BEFORE_REST = 2
+        const val FIRST_REST_MS = 5 * 60_000L
+        const val MAX_REST_MS = 60 * 60_000L
+    }
+}
+
 actual class Extractor {
     private var newPipeDownloader = NewPipeDownloaderImpl(proxy = null)
     private var braveNewPipeDownloader = BraveNewPipeDownloaderImpl(proxy = null)
@@ -43,12 +82,21 @@ actual class Extractor {
         // 403 used to skip straight to BravePipe. Driving the two as separate attempts is what
         // stops that jump.
 
+        // Fork: a tier that keeps failing is rested (see [TierHealth]). Measured on a Google TV
+        // Streamer, 2026-11-22: tiers 1 and 2 both returned URLs the CDN rejected for every song,
+        // costing about 5 s and 2 s before BravePipe answered in 1.5 s, on every single start.
+
         // Tier 1 — ciphers solved locally.
         // Re-registered every time: PipePipe drops the local decoder for good the first time it
         // throws, and the getter is package-private so its state cannot be read from here. Setting
         // it again turns "disabled forever" into "skipped for one track".
-        YoutubeApiDecoder.setLocalDecoder(faradayDecoder)
-        pipePipeStreams(videoId, LOCAL_TIER)?.let { return it }
+        val localRested = !localHealth.usable()
+        if (!localRested) {
+            YoutubeApiDecoder.setLocalDecoder(faradayDecoder)
+            val streams = pipePipeStreams(videoId, LOCAL_TIER)
+            localHealth.report(streams != null)
+            streams?.let { return it }
+        }
 
         // Tier 2 — same extractor with no local decoder at all, so every challenge is solved at
         // api.pipepipe.dev. This is the tier a 403 from tier 1 must reach.
@@ -58,12 +106,37 @@ actual class Extractor {
         // the API path when it is absent (verified in the bytecode of the pinned f8982ca9e7 jar).
         // PipePipe's own `disableLocalDecoder` does exactly this but is private, which is why it
         // cannot simply be called from here.
-        YoutubeApiDecoder.setLocalDecoder(null)
-        pipePipeStreams(videoId, REMOTE_TIER)?.let { return it }
+        val remoteRested = !remoteHealth.usable()
+        if (!remoteRested) {
+            YoutubeApiDecoder.setLocalDecoder(null)
+            val streams = pipePipeStreams(videoId, REMOTE_TIER)
+            remoteHealth.report(streams != null)
+            streams?.let { return it }
+        }
 
         // Tier 3 — a different extractor entirely.
-        return braveStreams(videoId)
+        val brave = braveStreams(videoId)
+        if (brave.isNotEmpty()) return brave
+        // BravePipe had nothing: a rested tier is still better than no stream at all.
+        if (localRested) {
+            YoutubeApiDecoder.setLocalDecoder(faradayDecoder)
+            pipePipeStreams(videoId, LOCAL_TIER)?.let {
+                localHealth.report(true)
+                return it
+            }
+        }
+        if (remoteRested) {
+            YoutubeApiDecoder.setLocalDecoder(null)
+            pipePipeStreams(videoId, REMOTE_TIER)?.let {
+                remoteHealth.report(true)
+                return it
+            }
+        }
+        return brave
     }
+
+    private val localHealth = TierHealth(LOCAL_TIER)
+    private val remoteHealth = TierHealth(REMOTE_TIER)
 
     actual fun liveHlsUrl(videoId: String): String? {
         // The same three tiers as newPipePlayer, in the same order and for the same reasons.
