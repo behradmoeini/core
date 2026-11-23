@@ -88,6 +88,27 @@ internal class SongRepositoryImpl(
             }
         }
 
+    override suspend fun getAccountHistory(): List<Track> =
+        withContext(Dispatchers.IO) {
+            // The History page: one shelf per period ("Today", "Yesterday", "Last week", a month).
+            youTube
+                .customQuery(browseId = "FEmusic_history", setLogin = true)
+                .onFailure { Logger.w(TAG, "Account history failed: ${it.message}") }
+                .getOrNull()
+                ?.contents
+                ?.singleColumnBrowseResultsRenderer
+                ?.tabs
+                ?.firstOrNull()
+                ?.tabRenderer
+                ?.content
+                ?.sectionListRenderer
+                ?.contents
+                .orEmpty()
+                .flatMap { it.musicShelfRenderer?.contents.orEmpty() }
+                .mapNotNull { row -> row.musicResponsiveListItemRenderer?.let { NextPage.fromMusicResponsiveListItemRenderer(it) } }
+                .toListTrack()
+        }
+
     /**
      * Fork: the own recommender's songs to follow [seedVideoId], or null when it is not registered,
      * fails or has nothing, in which case the caller asks YouTube as upstream does.

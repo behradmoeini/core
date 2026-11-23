@@ -62,6 +62,14 @@ interface SongRepository {
     suspend fun getPlayHistory(days: Int): List<com.maxrave.domain.recommendation.PlayHistoryRow>
 
     /**
+     * Fork: the signed-in account's own listening history on YouTube Music, most recent first
+     * (a song appears once per day it was played). Empty when signed out or on failure. It is what
+     * the listener played, not what YouTube suggests, and it is the only history a device has
+     * that was signed in a moment ago.
+     */
+    suspend fun getAccountHistory(): List<Track>
+
+    /**
      * Erase the local listening history and drop every song row nothing refers to any more.
      *
      * A song is kept when its id appears anywhere else at all: in an album, a YouTube playlist, a
