@@ -21,18 +21,24 @@ import com.maxrave.kotlinytmusicscraper.YouTube
 import com.maxrave.kotlinytmusicscraper.models.MediaType
 import com.maxrave.kotlinytmusicscraper.models.response.PlayerResponse
 import com.maxrave.logger.Logger
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal class StreamRepositoryImpl(
     private val localDataSource: LocalDataSource,
     private val youTube: YouTube,
 ) : StreamRepository {
+    /** Fork: work that may finish after a stream URL has been handed out (see getStream). */
+    private val afterStart = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override suspend fun insertNewFormat(newFormat: NewFormatEntity) =
         withContext(Dispatchers.IO) {
             localDataSource.insertNewFormat(newFormat)
@@ -206,10 +212,14 @@ internal class StreamRepositoryImpl(
                             ", expires in ${response.streamingData?.expiresInSeconds}s",
                     )
                     val durationSecond = response.videoDetails?.lengthSeconds?.toIntOrNull()
-                    // AutoMix metadata from Tidal official API
-                    var tidalBpm: Int? = null
-                    var tidalMusicKey: String? = null
-                    var tidalKeyScale: String? = null
+                    // AutoMix metadata (tempo and key) from Tidal's official API. Fork: it used to be
+                    // fetched right here, before the stream URL was handed to the player, so every
+                    // song waited for a Tidal search before it could start. Only a crossfade
+                    // minutes later reads it, so it is looked up after the URL is out and written
+                    // into the row then.
+                    val tidalBpm: Int? = null
+                    val tidalMusicKey: String? = null
+                    val tidalKeyScale: String? = null
                     if (!isVideo && durationSecond != null && data.third == MediaType.Song) {
                         val title = response.videoDetails?.title ?: ""
                         val author = response.videoDetails?.author ?: ""
@@ -225,17 +235,23 @@ internal class StreamRepositoryImpl(
                                 .replace(Regex("([()])"), "")
                                 .replace(".", " ")
                                 .replace("  ", " ")
-                        Logger.d("Stream", "Search Tidal metadata for: $q")
-                        youTube
-                            .searchTidalMetadata(q, durationSecond)
-                            .onSuccess { metadata ->
-                                Logger.d("Stream", "Tidal metadata: $metadata")
-                                tidalBpm = metadata.bpm
-                                tidalMusicKey = metadata.musicKey
-                                tidalKeyScale = metadata.keyScale
-                            }.onFailure {
-                                Logger.e("Stream", "Tidal metadata error: ${it.message}", it)
-                            }
+                        afterStart.launch {
+                            Logger.d("Stream", "Search Tidal metadata for: $q")
+                            youTube
+                                .searchTidalMetadata(q, durationSecond)
+                                .onSuccess { metadata ->
+                                    Logger.d("Stream", "Tidal metadata: $metadata")
+                                    // The row as it is now: it may have been replaced or
+                                    // invalidated while Tidal answered.
+                                    localDataSource.getNewFormat(videoId)?.let { row ->
+                                        localDataSource.insertNewFormat(
+                                            row.copy(bpm = metadata.bpm, musicKey = metadata.musicKey, keyScale = metadata.keyScale),
+                                        )
+                                    }
+                                }.onFailure {
+                                    Logger.e("Stream", "Tidal metadata error: ${it.message}", it)
+                                }
+                        }
                     }
                     insertNewFormat(
                         NewFormatEntity(
