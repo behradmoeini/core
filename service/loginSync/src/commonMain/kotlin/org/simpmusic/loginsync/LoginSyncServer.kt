@@ -216,6 +216,6 @@ private fun localDeviceName(): DeviceName {
             }
         }?.takeIf { it.isNotBlank() }
             ?: runCatching { InetAddress.getLocalHost().hostName }.getOrNull()
-            ?: "SimpMusic Desktop"
+            ?: "Listen Desktop"
     return DeviceName(name = name, os = if (isMac) "macOS" else osName)
 }
